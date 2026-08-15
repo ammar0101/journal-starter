@@ -3,7 +3,7 @@ from collections.abc import AsyncGenerator
 from fastapi import APIRouter, Depends, HTTPException
 
 from api.config import Settings, get_settings
-from api.models.entry import AnalysisResponse, Entry, EntryCreate
+from api.models.entry import AnalysisResponse, Entry, EntryCreate, EntryUpdate
 from api.repositories.postgres_repository import PostgresDB
 from api.services.entry_service import EntryService
 from api.services.llm_service import analyze_journal_entry
@@ -76,7 +76,9 @@ async def get_entry(entry_id: str, entry_service: EntryService = Depends(get_ent
 
 @router.patch("/entries/{entry_id}")
 async def update_entry(
-    entry_id: str, entry_update: dict, entry_service: EntryService = Depends(get_entry_service)
+    entry_id: str,
+    entry_update: EntryUpdate,
+    entry_service: EntryService = Depends(get_entry_service),
 ):
     """Update a journal entry.
 
@@ -86,7 +88,10 @@ async def update_entry(
     empty strings and 300-character bodies — see ``TestUpdateEntry`` in
     tests/test_api.py.
     """
-    result = await entry_service.update_entry(entry_id, entry_update)
+    # Convert the validated model back into a dictionary for the service
+    update_data = entry_update.model_dump(exclude_unset=True)
+
+    result = await entry_service.update_entry(entry_id, update_data)
     if not result:
         raise HTTPException(status_code=404, detail="Entry not found")
 
