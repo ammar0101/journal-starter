@@ -1,5 +1,8 @@
 # Import existing Journal API infrastructure
 
+For the complete end-to-end GitHub Actions deployment procedure, see the
+[Cloud Deployment Guide](../../docs/deployment.md).
+
 This Terraform configuration describes the existing `journal-api` ECR
 repository, `journal-cluster` EKS cluster, and its managed node group. It does
 not create the VPC, subnets, security groups, or IAM roles; it looks up the two

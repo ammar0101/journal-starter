@@ -25,6 +25,7 @@ PRs opened against `learntocloud/journal-starter` will be closed without review.
 - [Getting Started](#-getting-started)
 - [Development Workflow](#-development-workflow)
 - [Continuous Integration](#-continuous-integration)
+- [Cloud Deployment Guide](docs/deployment.md)
 - [Development Tasks](#-development-tasks)
 - [Data Schema](#-data-schema)
 - [AI Analysis Guide](#-ai-analysis-guide)
@@ -284,21 +285,21 @@ turn all of them green.
 ## 🤖 Continuous Integration
 
 Every push and pull request runs the GitHub Actions workflow in
-`.github/workflows/ci.yml`, which has two jobs:
+`.github/workflows/ci.yml`. It has three jobs:
 
-| Job  | What it checks | How to reproduce locally |
-|------|----------------|--------------------------|
-| `lint` | `ruff check`, `ruff format --check`, `pyright` | `uv run ruff check . && uv run ruff format --check . && uv run pyright` |
-| `test` | `pytest -v` against a real Postgres 16 service container, with `database_setup.sql` applied | `uv run pytest -v` |
+| Job | When it runs | What it does |
+|-----|--------------|--------------|
+| `test` | Pushes and pull requests | Runs Ruff, Pyright, and pytest against a temporary PostgreSQL 16 service container. |
+| `build` | Pushes to `main`, after `test` passes | Assumes the AWS build role through GitHub OIDC, builds the Docker image, and pushes it to ECR tagged with the commit SHA. |
+| `deploy` | Pushes to `main`, after `build` succeeds | Assumes the AWS deploy role through GitHub OIDC, bootstraps the database, deploys the image to EKS, waits for rollout and TLS readiness, and smoke-tests the public HTTPS API. |
 
-Both jobs run on every push to `main` and every PR. Your fork will
-show two green checks on a PR once **all** your implementations are complete
-(i.e., Tasks 1–4 are finished). Intermediate PRs that cover only some
-tasks will still have failing tests in CI — that's expected.
-CI intentionally receives no learner or provider credentials. The `test`
-job uses a disposable Postgres service container, and Task 4 is exercised
-with an injected mock OpenAI client so CI never calls a real LLM. Task 4's
-required live verification is run locally instead.
+Only `test` runs on pull requests; `build` and `deploy` run on pushes to
+`main`. The `test` job uses a disposable Postgres service container and a
+mocked LLM client, so CI does not need provider credentials. The deployment
+smoke test verifies `/version` and entry creation/deletion over HTTPS; it does
+not call the provider-dependent analysis endpoint. See the
+[Cloud Deployment Guide](docs/deployment.md) for the AWS setup, required GitHub
+variables, deployment flow, and verification steps.
 
 ## 🎯 Development Tasks
 
