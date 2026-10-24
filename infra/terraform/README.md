@@ -72,8 +72,8 @@ in GitHub.
 The CI/CD workflow runs one `test` job for pushes and pull requests. On pushes
 to `main`, `build` publishes an image tagged with the commit SHA and `deploy`
 runs the database bootstrap Job, applies the Deployment and HTTPS Ingress,
-waits for the rollout and certificate, then smoke-tests `/version`, entry
-creation, and analysis over HTTPS.
+waits for the rollout and certificate, then smoke-tests `/version` and entry
+creation/deletion over HTTPS.
 
 Before the first push to `main`, apply Terraform, wait for the ingress
 controller and certificate to become ready, and set the four repository

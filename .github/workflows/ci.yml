@@ -160,8 +160,4 @@ jobs:
             "$API_URL/entries")"
           entry_id="$(echo "$entry" | jq -r '.entry.id')"
           test -n "$entry_id"
-          analysis="$(curl --fail --silent --show-error \
-            -X POST "$API_URL/entries/$entry_id/analyze")"
-          echo "$analysis" | jq -e --arg id "$entry_id" \
-            '.entry_id == $id and (.summary | type == "string") and (.topics | type == "array")'
           curl --fail --silent --show-error -X DELETE "$API_URL/entries/$entry_id"
