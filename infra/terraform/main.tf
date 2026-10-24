@@ -47,7 +47,7 @@ data "aws_iam_role" "eks_nodegroup" {
 }
 
 data "aws_security_group" "eks_nodes" {
-  id = "sg-0b2f8450365fd8aef"
+  id = "sg-06595ec5d033c8465"
 }
 
 resource "aws_ecr_repository" "journal_api" {
