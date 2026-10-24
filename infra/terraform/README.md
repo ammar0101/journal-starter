@@ -60,8 +60,11 @@ Set these repository Actions variables in GitHub:
 The build role can push images only to the `journal-api` ECR repository. The
 deploy role can describe the cluster and has the EKS edit policy scoped to the
 `default` namespace. Both roles trust only GitHub Actions for the configured
-repository's `main` branch through OIDC; no long-lived AWS keys belong in
-GitHub.
+repository's `main` branch through OIDC. The trust policy matches the
+owner/repository IDs included in this repository's customized GitHub OIDC
+subject; update `github_owner_id` or `github_repository_id` if applying this
+configuration to a different GitHub repository. No long-lived AWS keys belong
+in GitHub.
 
 The CI/CD workflow runs one `test` job for pushes and pull requests. On pushes
 to `main`, `build` publishes an image tagged with the commit SHA and `deploy`

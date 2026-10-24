@@ -9,3 +9,15 @@ variable "github_repository" {
   type        = string
   default     = "ammar0101/journal-starter"
 }
+
+variable "github_owner_id" {
+  description = "GitHub account ID included in the repository's OIDC subject."
+  type        = string
+  default     = "92120099"
+}
+
+variable "github_repository_id" {
+  description = "GitHub repository ID included in the repository's OIDC subject."
+  type        = string
+  default     = "1333986993"
+}

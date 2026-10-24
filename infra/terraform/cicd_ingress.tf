@@ -1,5 +1,11 @@
 locals {
   github_oidc_url = "https://token.actions.githubusercontent.com"
+  github_owner    = split("/", var.github_repository)[0]
+  github_repo     = split("/", var.github_repository)[1]
+  github_subject_prefix = join("", [
+    "repo:${local.github_owner}@${var.github_owner_id}/",
+    "${local.github_repo}@${var.github_repository_id}",
+  ])
   github_oidc_host = trimprefix(
     local.github_oidc_url,
     "https://",
@@ -31,7 +37,7 @@ data "aws_iam_policy_document" "github_build_trust" {
     condition {
       test     = "StringEquals"
       variable = "${local.github_oidc_host}:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/main"]
+      values   = ["${local.github_subject_prefix}:ref:refs/heads/main"]
     }
   }
 }
@@ -55,7 +61,7 @@ data "aws_iam_policy_document" "github_deploy_trust" {
     condition {
       test     = "StringEquals"
       variable = "${local.github_oidc_host}:sub"
-      values   = ["repo:${var.github_repository}:environment:production"]
+      values   = ["${local.github_subject_prefix}:environment:production"]
     }
   }
 }
