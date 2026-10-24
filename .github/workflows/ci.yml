@@ -76,6 +76,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Diagnose GitHub OIDC subject
+        run: |
+          node <<'NODE'
+          (async () => {
+            const url = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+            url.searchParams.set("audience", "sts.amazonaws.com");
+            const response = await fetch(url, {
+              headers: {
+                Authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}`,
+              },
+            });
+            if (!response.ok) {
+              throw new Error(`OIDC token request failed with ${response.status}`);
+            }
+            const { value } = await response.json();
+            const claims = JSON.parse(
+              Buffer.from(value.split(".")[1], "base64url").toString(),
+            );
+            console.log(JSON.stringify({
+              iss: claims.iss,
+              sub: claims.sub,
+              aud: claims.aud,
+              repository: claims.repository,
+              ref: claims.ref,
+              environment: claims.environment,
+              job_workflow_ref: claims.job_workflow_ref,
+            }));
+          })().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
