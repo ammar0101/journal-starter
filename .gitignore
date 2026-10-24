@@ -136,6 +136,14 @@ ENV/
 env.bak/
 venv.bak/
 
+# Terraform state and working files
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
 # Spyder project settings
 .spyderproject
 .spyproject

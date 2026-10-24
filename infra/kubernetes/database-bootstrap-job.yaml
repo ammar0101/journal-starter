@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: journal-db-bootstrap
+  namespace: default
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: journal-db-bootstrap
+  namespace: default
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: journal-db-bootstrap
+    spec:
+      restartPolicy: Never
+      serviceAccountName: journal-db-bootstrap
+      containers:
+        - name: bootstrap
+          image: 098567766079.dkr.ecr.us-east-1.amazonaws.com/journal-api:runtime-secrets-dbhost-20261024
+          command:
+            - /app/.venv/bin/python
+            - /app/scripts/bootstrap_database.py
+          env:
+            - name: AWS_REGION
+              value: us-east-1
+            - name: APP_CONFIG_SECRET_ARN
+              value: arn:aws:secretsmanager:us-east-1:098567766079:secret:journal-api/runtime-VQa4l2
+            - name: RDS_MASTER_SECRET_ARN
+              value: arn:aws:secretsmanager:us-east-1:098567766079:secret:rds!db-a0ad87c1-792c-4806-81bd-34a8e461b096-cBiNDC

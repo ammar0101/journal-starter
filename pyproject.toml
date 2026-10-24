@@ -5,12 +5,17 @@ description = "Journal API"
 license = "MIT"
 requires-python = ">=3.14"
 dependencies = [
-    "fastapi",
+    "fastapi[standard]",
     "uvicorn",
     "asyncpg",
     "pydantic>=2.13.4",
     "pydantic-settings",
     "openai>=2.53.0",
+    "opentelemetry-api>=1.45.1",
+    "opentelemetry-sdk>=1.45.1",
+    "opentelemetry-instrumentation-fastapi>=0.66b1",
+    "opentelemetry-exporter-otlp>=1.45.1",
+    "boto3>=1.43.118",
 ]
 
 [project.optional-dependencies]

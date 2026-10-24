@@ -1,5 +1,8 @@
+import json
+import os
 from functools import lru_cache
 
+import boto3
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -53,4 +56,25 @@ def get_settings() -> Settings:
             openai_model="...",
         )
     """
+    secret_arn = os.getenv("APP_CONFIG_SECRET_ARN")
+    if secret_arn:
+        region = os.getenv("AWS_REGION", "us-east-1")
+        response = boto3.client("secretsmanager", region_name=region).get_secret_value(
+            SecretId=secret_arn
+        )
+        secret_string = response.get("SecretString")
+        if secret_string is None:
+            raise ValueError("Application configuration secret has no SecretString")
+        values = json.loads(secret_string)
+        return Settings(
+            database_url=values["DATABASE_URL"],
+            openai_api_key=values["OPENAI_API_KEY"],
+            openai_base_url=values["OPENAI_BASE_URL"],
+            openai_model=values["OPENAI_MODEL"],
+            _env_file=None,  # type: ignore[call-arg]
+        )
+
+    secrets_dir = os.getenv("APP_SECRETS_DIR")
+    if secrets_dir:
+        return Settings(_secrets_dir=secrets_dir, _env_file=None)  # type: ignore[call-arg]
     return Settings()  # type: ignore[call-arg]

@@ -30,6 +30,10 @@ RUN uv sync --no-dev
 # ==========================================
 FROM python:3.14-slim
 
+# Accept the Git commit SHA at build time and expose it to the app at runtime.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
+
 WORKDIR /app
 
 # Copy the fully built virtual environment and application code from the builder

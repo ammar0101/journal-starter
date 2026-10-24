@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD
 
 on:
   push:
@@ -14,36 +14,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.14
-
-      - name: Install dependencies
-        run: uv sync --locked --all-extras
-
-      - name: Ruff check
-        run: uv run ruff check .
-
-      - name: Ruff format check
-        run: uv run ruff format --check .
-
-      - name: Pyright type check
-        run: uv run pyright
-
   test:
-    name: Test
+    name: test
     runs-on: ubuntu-latest
-
     services:
       postgres:
         image: postgres:16
@@ -58,19 +31,11 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
     env:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: career_journal
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/career_journal
-      # Required by api.config.Settings so the app boots. Tests never call a
-      # real LLM — Task 4 uses an injected MockAsyncOpenAI client — so these
-      # values are never used for network requests.
       OPENAI_API_KEY: ci-placeholder-not-used-by-mock
       OPENAI_BASE_URL: https://example.invalid/v1
       OPENAI_MODEL: ci-placeholder-not-used-by-mock
-
     steps:
       - uses: actions/checkout@v4
 
@@ -85,6 +50,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras
 
+      - name: Run lint and type checks
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run pyright
+
       - name: Initialize database schema
         run: |
           PGPASSWORD=postgres psql \
@@ -93,30 +64,104 @@ jobs:
 
       - name: Run tests
         run: uv run pytest -v
-        
+
   build:
     name: build
     needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.AWS_BUILD_ROLE_ARN }}
           aws-region: us-east-1
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, tag, and push image to Amazon ECR
+      - name: Build and push commit-tagged image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: journal-api
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker build \
+            --build-arg GIT_SHA="$IMAGE_TAG" \
+            -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+  deploy:
+    name: deploy
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_API_URL }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure cluster access
+        run: aws eks update-kubeconfig --name journal-cluster --region us-east-1
+
+      - name: Deploy commit image and HTTPS ingress
+        env:
+          ECR_REGISTRY: 098567766079.dkr.ecr.us-east-1.amazonaws.com
+          ECR_REPOSITORY: journal-api
+          IMAGE_TAG: ${{ github.sha }}
+          PRODUCTION_API_HOST: ${{ vars.PRODUCTION_API_HOST }}
+        run: |
+          test -n "$PRODUCTION_API_HOST"
+          IMAGE_REF="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          kubectl delete job journal-db-bootstrap --ignore-not-found --wait=true
+          sed "s#image: .*#image: $IMAGE_REF#" \
+            infra/kubernetes/database-bootstrap-job.yaml | kubectl apply -f -
+          kubectl wait --for=condition=complete \
+            job/journal-db-bootstrap --timeout=10m
+          kubectl logs job/journal-db-bootstrap
+          kubectl delete job journal-db-bootstrap
+          sed "s#image: .*#image: $IMAGE_REF#" deployment.yaml | kubectl apply -f -
+          sed "s/journal-api.example.invalid/$PRODUCTION_API_HOST/g" \
+            infra/kubernetes/ingress.yaml | kubectl apply -f -
+          kubectl rollout status deployment/journal-api --timeout=5m
+          kubectl wait --for=condition=Ready certificate/journal-api-tls --timeout=10m
+
+      - name: Verify public HTTPS deployment
+        env:
+          API_URL: ${{ vars.PRODUCTION_API_URL }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          test -n "$API_URL"
+          version="$(curl --fail --silent --show-error --retry 10 \
+            --retry-all-errors --retry-delay 15 "$API_URL/version")"
+          echo "$version" | jq -e --arg commit "$EXPECTED_COMMIT" '.commit == $commit'
+          entry="$(curl --fail --silent --show-error \
+            -H 'Content-Type: application/json' \
+            -d '{"work":"CI smoke check","struggle":"none","intention":"verify deployment"}' \
+            "$API_URL/entries")"
+          entry_id="$(echo "$entry" | jq -r '.entry.id')"
+          test -n "$entry_id"
+          analysis="$(curl --fail --silent --show-error \
+            -X POST "$API_URL/entries/$entry_id/analyze")"
+          echo "$analysis" | jq -e --arg id "$entry_id" \
+            '.entry_id == $id and (.summary | type == "string") and (.topics | type == "array")'
+          curl --fail --silent --show-error -X DELETE "$API_URL/entries/$entry_id"

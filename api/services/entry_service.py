@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from api.repositories.postgres_repository import PostgresDB
+from api.telemetry import entries_created, tracer  # NEW
 
 logger = logging.getLogger("journal")
 
@@ -18,12 +19,21 @@ class EntryService:
         now = datetime.now(UTC)
         entry = {**entry_data, "created_at": now, "updated_at": now}
         logger.debug("Entry created: %s", entry)
-        return await self.db.create_entry(entry)
+        with tracer.start_as_current_span("db.create_entry") as span:
+            span.set_attribute("db.system", "postgresql")
+            span.set_attribute("db.operation", "INSERT")
+            created = await self.db.create_entry(entry)
+        entries_created.add(1)
+        return created
 
     async def get_all_entries(self) -> list[dict[str, Any]]:
         """Gets all entries."""
         logger.info("Fetching all entries")
-        entries = await self.db.get_all_entries()
+        with tracer.start_as_current_span("db.get_all_entries") as span:  # NEW
+            span.set_attribute("db.system", "postgresql")  # NEW
+            span.set_attribute("db.operation", "SELECT")  # NEW
+            entries = await self.db.get_all_entries()
+            span.set_attribute("db.result_count", len(entries))  # NEW
         logger.debug("Fetched %d entries", len(entries))
         return entries
 
