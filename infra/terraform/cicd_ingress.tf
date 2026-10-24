@@ -126,7 +126,7 @@ resource "aws_eks_access_entry" "github_deploy" {
 resource "aws_eks_access_policy_association" "github_deploy" {
   cluster_name  = aws_eks_cluster.journal.name
   principal_arn = aws_iam_role.github_deploy.arn
-  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy"
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminPolicy"
 
   access_scope {
     type       = "namespace"
