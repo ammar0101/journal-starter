@@ -58,10 +58,11 @@ Set these repository Actions variables in GitHub:
 | `PRODUCTION_API_HOST` | The hostname portion of `journal_api_production_url` |
 
 The build role can push images only to the `journal-api` ECR repository. The
-deploy role can describe the cluster and has the EKS admin policy scoped to
-the `default` namespace so it can manage the cert-manager Issuer custom
-resource as well as the application resources. Both roles trust only GitHub
-Actions for the configured
+deploy role can describe the cluster and has the EKS edit policy scoped to
+the `default` namespace so it can manage application resources. A
+namespace-scoped Kubernetes Role grants the additional cert-manager
+custom-resource permissions required by the workflow. Both roles trust only
+GitHub Actions for the configured
 repository's `main` branch through OIDC. The trust policy matches the
 owner/repository IDs included in this repository's customized GitHub OIDC
 subject; update `github_owner_id` or `github_repository_id` if applying this
@@ -76,8 +77,10 @@ creation, and analysis over HTTPS.
 
 Before the first push to `main`, apply Terraform, wait for the ingress
 controller and certificate to become ready, and set the four repository
-variables above. The workflow also requires the API configuration secret
-already provisioned in AWS Secrets Manager.
+variables above. After Terraform creates the deploy access entry, apply
+`../kubernetes/deploy-rbac.yaml` once using a cluster administrator context.
+The workflow also requires the API configuration secret already provisioned
+in AWS Secrets Manager.
 
 ## Remote state and importing existing resources
 

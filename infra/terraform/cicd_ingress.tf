@@ -118,15 +118,16 @@ resource "aws_iam_role_policy" "github_deploy_eks" {
 }
 
 resource "aws_eks_access_entry" "github_deploy" {
-  cluster_name  = aws_eks_cluster.journal.name
-  principal_arn = aws_iam_role.github_deploy.arn
-  type          = "STANDARD"
+  cluster_name      = aws_eks_cluster.journal.name
+  principal_arn     = aws_iam_role.github_deploy.arn
+  type              = "STANDARD"
+  kubernetes_groups = ["journal-api-deployer"]
 }
 
 resource "aws_eks_access_policy_association" "github_deploy" {
   cluster_name  = aws_eks_cluster.journal.name
   principal_arn = aws_iam_role.github_deploy.arn
-  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminPolicy"
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy"
 
   access_scope {
     type       = "namespace"

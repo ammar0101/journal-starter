@@ -1,0 +1,35 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: journal-api-deployer
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "serviceaccounts", "services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates", "issuers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: journal-api-deployer
+  namespace: default
+subjects:
+  - kind: Group
+    name: journal-api-deployer
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: journal-api-deployer
+  apiGroup: rbac.authorization.k8s.io
