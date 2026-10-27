@@ -112,20 +112,24 @@ resource "aws_iam_role_policy" "github_deploy_eks" {
     Statement = [{
       Effect   = "Allow"
       Action   = ["eks:DescribeCluster"]
-      Resource = aws_eks_cluster.journal.arn
+      Resource = data.aws_eks_cluster.journal.arn
+      }, {
+      Effect   = "Allow"
+      Action   = ["rds:DescribeDBInstances"]
+      Resource = "*"
     }]
   })
 }
 
 resource "aws_eks_access_entry" "github_deploy" {
-  cluster_name      = aws_eks_cluster.journal.name
+  cluster_name      = data.aws_eks_cluster.journal.name
   principal_arn     = aws_iam_role.github_deploy.arn
   type              = "STANDARD"
   kubernetes_groups = ["journal-api-deployer"]
 }
 
 resource "aws_eks_access_policy_association" "github_deploy" {
-  cluster_name  = aws_eks_cluster.journal.name
+  cluster_name  = data.aws_eks_cluster.journal.name
   principal_arn = aws_iam_role.github_deploy.arn
   policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy"
 
@@ -146,7 +150,7 @@ resource "aws_eip" "journal_api_ingress" {
 }
 
 data "aws_subnet" "journal_api_ingress" {
-  id = "subnet-0fff35569a6bfb846"
+  id = local.ingress_subnet_id
 }
 
 resource "aws_iam_role" "aws_load_balancer_controller" {
@@ -253,7 +257,7 @@ resource "aws_iam_role_policy" "aws_load_balancer_controller" {
 }
 
 resource "aws_eks_pod_identity_association" "aws_load_balancer_controller" {
-  cluster_name    = aws_eks_cluster.journal.name
+  cluster_name    = data.aws_eks_cluster.journal.name
   namespace       = "kube-system"
   service_account = "aws-load-balancer-controller"
   role_arn        = aws_iam_role.aws_load_balancer_controller.arn
@@ -274,9 +278,9 @@ resource "helm_release" "aws_load_balancer_controller" {
   wait       = true
 
   values = [yamlencode({
-    clusterName  = aws_eks_cluster.journal.name
+    clusterName  = data.aws_eks_cluster.journal.name
     region       = var.aws_region
-    vpcId        = "vpc-0df814fc7fc2dc6f0"
+    vpcId        = data.aws_vpc.journal.id
     replicaCount = 1
     serviceAccount = {
       create = true
@@ -298,7 +302,6 @@ resource "helm_release" "aws_load_balancer_controller" {
   })]
 
   depends_on = [
-    aws_eks_node_group.journal,
     aws_eks_pod_identity_association.aws_load_balancer_controller,
   ]
 }
@@ -339,7 +342,7 @@ resource "helm_release" "cert_manager" {
     }
   })]
 
-  depends_on = [aws_eks_node_group.journal]
+  depends_on = [aws_eks_addon.pod_identity_agent]
 }
 
 resource "helm_release" "traefik" {
@@ -352,8 +355,28 @@ resource "helm_release" "traefik" {
   wait       = true
 
   values = [yamlencode({
+    ports = {
+      web = {
+        http = {
+          redirections = {
+            entryPoint = {
+              to        = "websecure"
+              scheme    = "https"
+              permanent = true
+            }
+          }
+        }
+      }
+    }
     deployment = {
       replicas = 1
+    }
+    updateStrategy = {
+      type = "RollingUpdate"
+      rollingUpdate = {
+        maxUnavailable = 1
+        maxSurge       = 0
+      }
     }
     nodeSelector = {
       "topology.kubernetes.io/zone" = data.aws_subnet.journal_api_ingress.availability_zone
@@ -377,7 +400,7 @@ resource "helm_release" "traefik" {
         "service.beta.kubernetes.io/aws-load-balancer-type"            = "external"
         "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type" = "ip"
         "service.beta.kubernetes.io/aws-load-balancer-scheme"          = "internet-facing"
-        "service.beta.kubernetes.io/aws-load-balancer-subnets"         = "subnet-0fff35569a6bfb846"
+        "service.beta.kubernetes.io/aws-load-balancer-subnets"         = local.ingress_subnet_id
         "service.beta.kubernetes.io/aws-load-balancer-eip-allocations" = aws_eip.journal_api_ingress.id
         "service.beta.kubernetes.io/aws-load-balancer-attributes"      = "load_balancing.cross_zone.enabled=true"
       }
@@ -395,7 +418,6 @@ resource "helm_release" "traefik" {
   })]
 
   depends_on = [
-    aws_eks_node_group.journal,
     helm_release.aws_load_balancer_controller,
   ]
 }

@@ -28,6 +28,6 @@ spec:
             - name: AWS_REGION
               value: us-east-1
             - name: APP_CONFIG_SECRET_ARN
-              value: arn:aws:secretsmanager:us-east-1:098567766079:secret:journal-api/runtime-VQa4l2
+              value: journal-api/runtime
             - name: RDS_MASTER_SECRET_ARN
-              value: arn:aws:secretsmanager:us-east-1:098567766079:secret:rds!db-a0ad87c1-792c-4806-81bd-34a8e461b096-cBiNDC
+              value: RDS_MASTER_SECRET_ARN_VALUE

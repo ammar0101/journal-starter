@@ -14,6 +14,10 @@ terraform {
       source  = "hashicorp/aws"
       version = ">= 6.0, < 7.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.6, < 4.0"
+    }
     helm = {
       source  = "hashicorp/helm"
       version = ">= 3.0, < 4.0"
@@ -27,27 +31,48 @@ provider "aws" {
 
 provider "helm" {
   kubernetes = {
-    host                   = aws_eks_cluster.journal.endpoint
-    cluster_ca_certificate = base64decode(aws_eks_cluster.journal.certificate_authority[0].data)
+    host                   = data.aws_eks_cluster.journal.endpoint
+    cluster_ca_certificate = base64decode(data.aws_eks_cluster.journal.certificate_authority[0].data)
 
     exec = {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "aws"
-      args        = ["eks", "get-token", "--cluster-name", aws_eks_cluster.journal.name, "--region", var.aws_region]
+      args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.journal.name, "--region", var.aws_region]
     }
   }
 }
 
-data "aws_iam_role" "eks_cluster" {
-  name = "eksctl-journal-cluster-cluster-ServiceRole-vQcwEl8OrvGu"
+data "aws_eks_cluster" "journal" {
+  name = "journal-cluster"
 }
 
-data "aws_iam_role" "eks_nodegroup" {
-  name = "eksctl-journal-cluster-nodegroup-n-NodeInstanceRole-WX7ls8D9SWts"
+data "aws_vpc" "journal" {
+  id = data.aws_eks_cluster.journal.vpc_config[0].vpc_id
 }
 
-data "aws_security_group" "eks_nodes" {
-  id = "sg-06595ec5d033c8465"
+data "aws_subnet" "journal_cluster" {
+  for_each = toset(data.aws_eks_cluster.journal.vpc_config[0].subnet_ids)
+
+  id = each.value
+}
+
+locals {
+  cluster_subnets = {
+    for subnet_id, subnet in data.aws_subnet.journal_cluster :
+    subnet_id => subnet
+  }
+  private_subnet_ids = [
+    for subnet_id, subnet in local.cluster_subnets : subnet_id
+    if !subnet.map_public_ip_on_launch
+  ]
+  public_subnet_ids = [
+    for subnet_id, subnet in local.cluster_subnets : subnet_id
+    if subnet.map_public_ip_on_launch
+  ]
+  ingress_subnet_id = sort([
+    for subnet_id, subnet in local.cluster_subnets : subnet_id
+    if subnet.map_public_ip_on_launch && subnet.availability_zone == "us-east-1d"
+  ])[0]
 }
 
 resource "aws_ecr_repository" "journal_api" {
@@ -63,142 +88,17 @@ resource "aws_ecr_repository" "journal_api" {
   }
 }
 
-resource "aws_eks_cluster" "journal" {
-  name     = "journal-cluster"
-  role_arn = data.aws_iam_role.eks_cluster.arn
-  version  = "1.34"
-  tags = {
-    Name                                          = "eksctl-journal-cluster-cluster/ControlPlane"
-    "alpha.eksctl.io/cluster-name"                = "journal-cluster"
-    "alpha.eksctl.io/cluster-oidc-enabled"        = "false"
-    "eksctl.cluster.k8s.io/v1alpha1/cluster-name" = "journal-cluster"
-    "alpha.eksctl.io/eksctl-version"              = "0.231.0"
-  }
-
-  vpc_config {
-    subnet_ids = [
-      "subnet-05718365d405c6861",
-      "subnet-0fff35569a6bfb846",
-      "subnet-0c7504ea8d5c2dac5",
-      "subnet-0aa44dfb5c66b38e1",
-    ]
-    security_group_ids      = ["sg-0c39947bd91527fbc"]
-    endpoint_public_access  = true
-    endpoint_private_access = false
-    public_access_cidrs     = ["0.0.0.0/0"]
-  }
-
-  access_config {
-    authentication_mode                         = "API_AND_CONFIG_MAP"
-    bootstrap_cluster_creator_admin_permissions = true
-  }
-
-  control_plane_scaling_config {
-    tier = "standard"
-  }
-
-  kube_api_server_config {
-    event_ttl = "60m"
-
-    service_node_port_range {
-      min_port = 30000
-      max_port = 32767
-    }
-  }
-
-  kube_controller_manager_config {
-    horizontal_pod_autoscaler_controller_config {
-      horizontal_pod_autoscaler_sync_period = "15s"
-    }
-
-    pod_gc_controller_config {
-      terminated_pod_gc_threshold = 12500
-    }
-  }
-
-  kube_scheduler_config {
-    node_resources_fit {
-      scoring_strategy {
-        type = "LeastAllocated"
-
-        resource {
-          name   = "cpu"
-          weight = 1
-        }
-
-        resource {
-          name   = "memory"
-          weight = 1
-        }
-      }
-    }
-  }
-
-  kubernetes_network_config {
-    ip_family         = "ipv4"
-    service_ipv4_cidr = "10.100.0.0/16"
-
-    elastic_load_balancing {
-      enabled = false
-    }
-  }
-
-  upgrade_policy {
-    support_type = "EXTENDED"
-  }
-
-  enabled_cluster_log_types = []
-}
-
-resource "aws_eks_node_group" "journal" {
-  cluster_name    = aws_eks_cluster.journal.name
-  node_group_name = "ng-814ac263"
-  node_role_arn   = data.aws_iam_role.eks_nodegroup.arn
-  subnet_ids      = ["subnet-05718365d405c6861", "subnet-0fff35569a6bfb846"]
-  version         = "1.34"
-  release_version = "1.34.11-20261012"
-  capacity_type   = "ON_DEMAND"
-  instance_types  = ["t3.micro"]
-  ami_type        = "AL2023_x86_64_STANDARD"
-  labels = {
-    "alpha.eksctl.io/cluster-name"   = "journal-cluster"
-    "alpha.eksctl.io/nodegroup-name" = "ng-814ac263"
-  }
-  tags = {
-    "alpha.eksctl.io/cluster-name"                = "journal-cluster"
-    "alpha.eksctl.io/eksctl-version"              = "0.231.0"
-    "alpha.eksctl.io/nodegroup-name"              = "ng-814ac263"
-    "alpha.eksctl.io/nodegroup-type"              = "managed"
-    "eksctl.cluster.k8s.io/v1alpha1/cluster-name" = "journal-cluster"
-  }
-
-  scaling_config {
-    min_size     = 2
-    max_size     = 9
-    desired_size = 9
-  }
-
-  update_config {
-    max_unavailable = 1
-  }
-
-  launch_template {
-    id      = "lt-0e0a79e1fe76d8a14"
-    version = "1"
-  }
-}
-
 resource "aws_security_group" "journal_db" {
   name_prefix = "journal-api-db-"
-  description = "Allow PostgreSQL from the existing EKS worker nodes"
-  vpc_id      = "vpc-0df814fc7fc2dc6f0"
+  description = "Allow PostgreSQL from the EKS VPC"
+  vpc_id      = data.aws_vpc.journal.id
 
   ingress {
-    description     = "PostgreSQL from EKS worker nodes"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [data.aws_security_group.eks_nodes.id]
+    description = "PostgreSQL from the EKS VPC"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = [data.aws_vpc.journal.cidr_block]
   }
 
   egress {
@@ -216,10 +116,7 @@ resource "aws_security_group" "journal_db" {
 resource "aws_db_subnet_group" "journal" {
   name        = "journal-api-db-subnets"
   description = "Private subnets for the Journal API PostgreSQL database"
-  subnet_ids = [
-    "subnet-0aa44dfb5c66b38e1",
-    "subnet-0c7504ea8d5c2dac5",
-  ]
+  subnet_ids  = local.private_subnet_ids
 
   tags = {
     Name = "journal-api-db-subnets"
@@ -256,14 +153,29 @@ resource "aws_db_instance" "journal" {
   }
 }
 
-data "aws_secretsmanager_secret" "journal_runtime" {
+resource "aws_secretsmanager_secret" "journal_runtime" {
   name = "journal-api/runtime"
 }
 
+resource "random_password" "journal_db" {
+  length  = 32
+  special = false
+}
+
+resource "aws_secretsmanager_secret_version" "journal_runtime" {
+  secret_id = aws_secretsmanager_secret.journal_runtime.id
+  secret_string = jsonencode({
+    DATABASE_URL    = "postgresql://journal_api:${random_password.journal_db.result}@${aws_db_instance.journal.address}:${aws_db_instance.journal.port}/${aws_db_instance.journal.db_name}"
+    APP_DB_PASSWORD = random_password.journal_db.result
+    OPENAI_API_KEY  = "placeholder"
+    OPENAI_BASE_URL = "https://api.openai.com/v1"
+    OPENAI_MODEL    = "gpt-4o-mini"
+  })
+}
+
 resource "aws_eks_addon" "pod_identity_agent" {
-  cluster_name  = aws_eks_cluster.journal.name
-  addon_name    = "eks-pod-identity-agent"
-  addon_version = "v1.4.1-eksbuild.2"
+  cluster_name = data.aws_eks_cluster.journal.name
+  addon_name   = "eks-pod-identity-agent"
 }
 
 resource "aws_iam_role" "journal_runtime_secrets" {
@@ -296,7 +208,7 @@ resource "aws_iam_role_policy" "journal_runtime_secrets" {
         "secretsmanager:DescribeSecret",
         "secretsmanager:GetSecretValue",
       ]
-      Resource = data.aws_secretsmanager_secret.journal_runtime.arn
+      Resource = aws_secretsmanager_secret.journal_runtime.arn
     }]
   })
 }
@@ -333,14 +245,14 @@ resource "aws_iam_role_policy" "journal_db_bootstrap" {
       ]
       Resource = [
         aws_db_instance.journal.master_user_secret[0].secret_arn,
-        data.aws_secretsmanager_secret.journal_runtime.arn,
+        aws_secretsmanager_secret.journal_runtime.arn,
       ]
     }]
   })
 }
 
 resource "aws_eks_pod_identity_association" "journal_runtime" {
-  cluster_name    = aws_eks_cluster.journal.name
+  cluster_name    = data.aws_eks_cluster.journal.name
   namespace       = "default"
   service_account = "journal-api"
   role_arn        = aws_iam_role.journal_runtime_secrets.arn
@@ -352,7 +264,7 @@ resource "aws_eks_pod_identity_association" "journal_runtime" {
 }
 
 resource "aws_eks_pod_identity_association" "journal_db_bootstrap" {
-  cluster_name    = aws_eks_cluster.journal.name
+  cluster_name    = data.aws_eks_cluster.journal.name
   namespace       = "default"
   service_account = "journal-db-bootstrap"
   role_arn        = aws_iam_role.journal_db_bootstrap.arn

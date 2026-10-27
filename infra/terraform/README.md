@@ -1,17 +1,16 @@
-# Import existing Journal API infrastructure
+# Journal API infrastructure
 
 For the complete end-to-end GitHub Actions deployment procedure, see the
 [Cloud Deployment Guide](../../docs/deployment.md).
 
-This Terraform configuration describes the existing `journal-api` ECR
-repository, `journal-cluster` EKS cluster, and its managed node group. It does
-not create the VPC, subnets, security groups, or IAM roles; it looks up the two
-EKS roles by name and references the existing network resources.
+This Terraform configuration creates the Journal API's ECR repository,
+PostgreSQL database, GitHub Actions IAM roles, Kubernetes add-ons, and ingress.
+It expects the `journal-cluster` EKS cluster and its VPC and managed node group
+to be created separately with `eksctl`; Terraform reads the cluster and network
+configuration rather than managing those resources.
 
-The EKS API endpoint currently permits connections from `0.0.0.0/0`. This
-configuration preserves the current setting so an import does not silently
-change access. Restrict `public_access_cidrs` to your trusted IP before making
-any future apply.
+The cluster API endpoint is public. Restrict its allowed CIDRs to trusted
+addresses before using the cluster beyond this verification deployment.
 
 ## PostgreSQL database
 
@@ -19,8 +18,8 @@ The configuration provisions a single-AZ PostgreSQL 16.13 `db.t4g.micro`
 instance with 20 GiB gp3 storage, encryption, one day of automated backups,
 deletion protection, and an RDS-managed master password in AWS Secrets Manager.
 It is private in the two existing private subnets. Its security group allows
-PostgreSQL only from the EKS worker-node security group. The password is not
-written into Terraform configuration.
+PostgreSQL only from the cluster VPC. The application role password is
+generated and stored in Secrets Manager.
 
 RDS, Secrets Manager, the existing NAT gateway, EKS, and related AWS resources
 can incur charges. The database is not guaranteed to be covered by Free Tier or
@@ -79,37 +78,37 @@ waits for the rollout and certificate, then smoke-tests `/version` and entry
 creation/deletion over HTTPS.
 
 Before the first push to `main`, apply Terraform, wait for the ingress
-controller and certificate to become ready, and set the four repository
-variables above. After Terraform creates the deploy access entry, apply
+controller and load balancer to become ready, and set the four repository
+variables above. The first deploy creates the Ingress and its certificate.
+The deploy workflow discovers the RDS master secret ARN through its read-only
+`rds:DescribeDBInstances` permission. After Terraform creates the deploy
+access entry, apply
 `../kubernetes/deploy-rbac.yaml` once using a cluster administrator context.
 The workflow also requires the API configuration secret already provisioned
 in AWS Secrets Manager.
 
-## Remote state and importing existing resources
+## Remote state and initialization
 
 The remote state bucket is `journal-api-tfstate-098567766079-f876924a` in
-`us-east-1`. It has versioning, default AES-256 encryption, S3 public-access
-blocking, bucket-owner-enforced object ownership, and a bucket policy that
-requires HTTPS. The S3 backend uses native lock files, so use Terraform 1.10 or
-newer.
+`us-east-1`. It uses versioning, AES-256 encryption, S3 public-access blocking,
+and native Terraform lock files. Use Terraform 1.10 or newer.
 
-Run these commands from this directory with AWS credentials configured for
-account `098567766079`:
+Create the EKS cluster first, then initialize Terraform from this directory
+with AWS credentials configured for account `098567766079`:
 
 ```powershell
+eksctl create cluster --name journal-cluster --region us-east-1 --version 1.34 `
+  --nodes 9 --nodes-min 9 --nodes-max 9 --node-type t3.micro `
+  --node-volume-size 20 --managed --node-private-networking `
+  --vpc-nat-mode Single --with-oidc
 terraform init -reconfigure
-terraform import aws_ecr_repository.journal_api journal-api
-terraform import aws_eks_cluster.journal journal-cluster
-terraform import aws_eks_node_group.journal journal-cluster:ng-814ac263
 terraform plan
 ```
 
-`terraform import` reads the existing resources and records them in remote
-Terraform state; it does not create or update AWS resources. Review the plan
-carefully. Do not run `terraform apply` until every proposed change is
-understood and approved. In particular, this cluster and node group were
-created by `eksctl`/CloudFormation, so managing the same resources from
-Terraform requires care to avoid conflicting changes.
+The EKS control plane, nine `t3.micro` worker nodes, NAT gateway, RDS database,
+and public load balancer incur ongoing charges. Review the plan and AWS
+pricing before applying, and delete these resources when they are no longer
+needed.
 
 Terraform state is ignored by Git because it can contain sensitive resource
 details. AWS access to the state bucket should remain limited to the people and

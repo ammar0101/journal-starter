@@ -12,7 +12,19 @@ These tests verify that the API endpoints work correctly, including:
 
 from unittest.mock import patch
 
+import pytest
 from httpx import AsyncClient
+
+
+class TestVersionEndpoint:
+    """Tests for deployment metadata and HTTPS response headers."""
+
+    @pytest.mark.no_db
+    async def test_version_response_includes_hsts(self, test_client: AsyncClient):
+        response = await test_client.get("/version")
+
+        assert response.status_code == 200
+        assert response.headers["strict-transport-security"] == "max-age=31536000"
 
 
 class TestCreateEntry:

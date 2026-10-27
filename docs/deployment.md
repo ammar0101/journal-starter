@@ -1,12 +1,12 @@
 # Cloud Deployment Guide
 
 This guide documents the Journal API's AWS deployment and the steps needed to
-reproduce its CI/CD workflow. It describes this repository's existing
-`journal-cluster` setup; it is **not** a one-command, greenfield AWS
-provisioner. The Terraform configuration expects an existing VPC, subnets,
-security groups, EKS cluster, node-group IAM roles, and remote state bucket.
-See the [Terraform notes](../infra/terraform/README.md) before importing or
-changing existing infrastructure.
+reproduce its CI/CD workflow. The EKS cluster is created with `eksctl`, and
+Terraform provisions the application-specific AWS resources and Kubernetes
+add-ons. The cluster, database, NAT gateway, and public load balancer incur
+ongoing charges; review AWS pricing and clean them up when no longer needed.
+See the [Terraform notes](../infra/terraform/README.md) for infrastructure
+details.
 
 ## Architecture
 
@@ -30,8 +30,8 @@ keys in GitHub.
 
 ## Prerequisites
 
-- An AWS account with the existing VPC, EKS cluster, node group, IAM roles, and
-  S3 Terraform state bucket expected by `infra/terraform/`.
+- An AWS account with permissions to create EKS, networking, IAM, RDS, ECR,
+  and S3 resources in `us-east-1`.
 - AWS CLI configured locally for that account, with permissions to manage the
   resources in the Terraform configuration.
 - Terraform 1.10 or newer and `kubectl`.
@@ -45,22 +45,27 @@ Confirm the AWS identity before running Terraform:
 aws sts get-caller-identity
 ```
 
-## 1. Prepare Terraform state and infrastructure
+## 1. Create EKS and prepare Terraform state
 
-Run Terraform from `infra/terraform`:
+Create the cluster and managed node group with `eksctl`:
+
+```powershell
+eksctl create cluster --name journal-cluster --region us-east-1 --version 1.34 `
+  --nodes 9 --nodes-min 9 --nodes-max 9 --node-type t3.micro `
+  --node-volume-size 20 --managed --node-private-networking `
+  --vpc-nat-mode Single --with-oidc
+```
+
+Then initialize Terraform from `infra/terraform`:
 
 ```powershell
 Set-Location infra\terraform
 terraform init -reconfigure
 ```
 
-The S3 backend is configured in `main.tf`. If this is the existing deployment,
-use the existing remote state. If the backend has no state for this
-infrastructure yet, first follow the import guidance in the
-[Terraform notes](../infra/terraform/README.md); do not plan from an empty
-state and assume it is safe to apply. The configuration references existing
-network resources and IAM roles, so it cannot create this infrastructure in
-an empty AWS account.
+The S3 backend is configured in `main.tf`. Terraform creates the ECR
+repository, database, secret, IAM roles, and Kubernetes add-ons, while reading
+the EKS cluster's VPC and subnet configuration.
 
 Terraform also looks up `journal-api/runtime` by name. If the secret does not
 exist, create it with valid JSON before planning. It can contain placeholders

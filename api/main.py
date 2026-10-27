@@ -1,7 +1,8 @@
 import logging
 import os
+from collections.abc import Awaitable, Callable
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from api.routers.journal_router import router as journal_router
@@ -24,6 +25,16 @@ app = FastAPI(
     title="Journal API",
     description="A simple journal API for tracking daily work, struggles, and intentions",
 )
+
+
+@app.middleware("http")
+async def add_hsts_header(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    response = await call_next(request)
+    response.headers["Strict-Transport-Security"] = "max-age=31536000"
+    return response
 
 
 @app.get("/version")

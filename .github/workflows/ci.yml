@@ -131,9 +131,16 @@ jobs:
           PRODUCTION_API_HOST: ${{ vars.PRODUCTION_API_HOST }}
         run: |
           test -n "$PRODUCTION_API_HOST"
+          RDS_MASTER_SECRET_ARN="$(aws rds describe-db-instances \
+            --db-instance-identifier journal-api-db \
+            --query 'DBInstances[0].MasterUserSecret.SecretArn' \
+            --output text)"
+          test -n "$RDS_MASTER_SECRET_ARN"
+          test "$RDS_MASTER_SECRET_ARN" != "None"
           IMAGE_REF="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           kubectl delete job journal-db-bootstrap --ignore-not-found --wait=true
-          sed "s#image: .*#image: $IMAGE_REF#" \
+          sed -e "s#image: .*#image: $IMAGE_REF#" \
+            -e "s#RDS_MASTER_SECRET_ARN_VALUE#$RDS_MASTER_SECRET_ARN#" \
             infra/kubernetes/database-bootstrap-job.yaml | kubectl apply -f -
           kubectl wait --for=condition=complete \
             job/journal-db-bootstrap --timeout=10m
